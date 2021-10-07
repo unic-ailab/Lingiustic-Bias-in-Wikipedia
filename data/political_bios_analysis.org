@@ -1,0 +1,215 @@
+#+begin_src ipython :session session01 :exports none :results raw drawer
+import numpy as np
+import pandas as pd
+import json
+from utils import frequencies, mean_abstract_level
+
+import seaborn as sns
+import matplotlib.pyplot as plt
+%matplotlib inline
+#+end_src
+
+#+RESULTS:
+:results:
+# Out[18]:
+:end:
+#+begin_src ipython :session session01 :exports none results: raw drawer
+# Loading the biographies
+
+with open('/home/emath/Data Science/AI Lab-Research/Wikipedia Project/Data/biographies_rev_history_new.json', 'r') as read_file:
+    revisions = json.load(read_file)
+#+end_src
+
+#+RESULTS:
+: # Out[17]:
+#+begin_src ipython :session session01 :exports none results: raw drawer
+# Clear out the revisions that doesn't contain any content
+for name in revisions.keys():
+    print(name)
+    counter = 0 # we keep track of how many revisions per biography have been deleted
+    revisions_to_be_deleted = []
+    for rev_id in revisions[name].keys():
+        if len(revisions[name][rev_id]['content']) == 0:
+            # delete all the revisions that don't have content
+            # the content has been deleted prior to our analysis
+            revisions_to_be_deleted.append(rev_id)
+            counter += 1
+    for rev_id in revisions_to_be_deleted:
+        del revisions[name][rev_id]
+#+end_src
+
+#+RESULTS:
+: # Out[18]:
+#+begin_src ipython :session session01 :exports none results: raw drawer
+# load the didaxto's dictionaries
+
+with open("/home/emath/Data Science/AI Lab-Research/Wikipedia Project/Data/neg_domain_words.txt", "rb") as read_file:
+    neg_domain_words = set(line.decode(errors='ignore').strip() for line in read_file)
+    
+with open("/home/emath/Data Science/AI Lab-Research/Wikipedia Project/Data/pos_domain_words.txt", "rb") as read_file:
+    pos_domain_words = set(line.decode(errors='ignore').strip() for line in read_file)
+#+end_src
+
+#+RESULTS:
+: # Out[19]:
+#+begin_src ipython :session session01 :exports none results: raw drawer
+def frequencies(rev_content: str, posTags: dict):
+    """
+    With this function we count the number of positives and negatives words
+    that are being in the context. We use the two pretrained dictionaries
+    neg_domain_words and pos_domain_words.
+    """
+    words_count_freqs = {}
+    tokens = nltk.word_tokenize(rev_content)
+    words_count_freqs = Counter(tokens)
+    length = len(tokens)
+
+    pos = 0  # number of positives words
+    neg = 0  # number of negative words
+    verbs = 0 # number of verbs
+    adverbs = 0 # number of adverbs
+    adjectives = 0 # number of adjectives
+
+    for word in words_count_freqs:
+        if word in pos_domain_words: pos+=words_count_freqs[word]
+        elif word in neg_domain_words: neg+=words_count_freqs[word]
+        if word not in posTags.keys():
+            posTags[word] = nltk.pos_tag([word])[0][1]
+        if re.search('VB.+', posTags[word]): verbs+=words_count_freqs[word]
+        elif re.search('RB.+', posTags[word]): adverbs+=words_count_freqs[word]
+        elif re.search('JJ.+', posTags[word]): adjectives+=words_count_freqs[word]    
+    
+    return pos, neg, adjectives, verbs, adverbs, length 
+#+end_src
+
+#+RESULTS:
+: # Out[20]:
+#+begin_src ipython :session session01 :exports none results: raw drawer
+def mean_abstract_level(row):
+    numerator = 2*row['verbs']+4*(row['adjectives']+row['adverbs'])
+    denominator = row['adjectives']+row['verbs']+row['adverbs']
+    mal = numerator/denominator
+    return mal
+#+end_src
+
+#+RESULTS:
+: # Out[21]:
+#+begin_src ipython :session session01 :exports none results: raw drawer
+# Build lists to create a dataframe
+columns = ['name', 'revision Id', 'Date', 'length', 
+           'pos_words', 'neg_words', 'adjectives',
+           'verbs', 'adverbs'] 
+values = []
+posTags = {}
+for name in revisions.keys():
+    i=0
+    for revid in revisions[name].keys():
+        content = revisions[name][revid]['content']
+        pos, neg, adj, verbs, adverbs, length = frequencies(content, posTags, pos_domain_words, neg_domain_words)
+        values.append([name, revid, revisions[name][revid]['timestamp'], length, pos, neg, adj, verbs, adverbs])
+        i += 1
+
+revisions_df = pd.DataFrame(data=values, columns=columns)
+revisions_df['mean_abstract_level'] = mean_abstract_level(revisions_df)
+#+end_src
+
+#+RESULTS:
+: # Out[20]:
+#+begin_src ipython :session session01 :exports none results: raw drawer
+revisions_df = pd.DataFrame(data=values, columns=columns)
+
+revisions_df['mean_abstract_level'] = mean_abstract_level(revisions_df)
+
+print("#+CAPTION: Results") 
+print(tabulate(revisions_df.head(20), headers='keys', tablefmt='orgtbl', showindex='always'))
+#+end_src
+
+#+RESULTS:
+: # Out[23]:
+#+begin_src ipython :session session01 :exports none results: raw drawer
+revisions_df.info()
+#+end_src
+
+#+RESULTS:
+: # Out[31]:
+#+begin_src ipython :session session01 :exports none results: raw drawer
+# create a dataframe. Each row represents a revision for a specific biography
+
+revisions_df['Date'] = pd.to_datetime(revisions_df['Date'])
+revisions_df['pos_ratio'] = revisions_df['pos_words']/revisions_df['length']
+revisions_df['neg_ratio'] = revisions_df['neg_words']/revisions_df['length']
+revisions_df['adj_ratio'] = revisions_df['adjectives']/revisions_df['length']
+
+print("#+CAPTION: Results") 
+print(tabulate(revisions_df.describe()
+, headers='keys', tablefmt='orgtbl', showindex='always'))
+#+end_src
+
+#+RESULTS:
+: # Out[24]:
+#+begin_src ipython :session session01 :exports none results: raw drawer
+def draw_plot(name: str, fig):
+ """
+ Helper function to create plots.
+ """
+ ax = fig.add_subplot(2,1,1)
+ ax2 = fig.add_subplot(2,1,2)
+
+ tmp_df = revisions_df.set_index(["name"]).loc[name].set_index("Date")
+    
+ ax.plot(tmp_df['pos_ratio'], label="Recep Tayyip Erdoğan") # positive words concentration
+ ax2.plot(tmp_df['length'], label="Recep Tayyip Erdoğan") # length of revision plot
+    
+ ax.spines["top"].set_color("None")
+ ax.spines["right"].set_color("None")
+ ax2.spines["top"].set_color("None")
+ ax2.spines["right"].set_color("None")
+ 
+ ax.set_xlim(0, tmp_df.shape[0]+50, auto=True)
+ ax2.set_xlim(0, tmp_df.shape[0]+50, auto=True)
+ 
+ plt.setp(ax.get_xticklabels(), rotation=45, ha="right",
+          rotation_mode="anchor")
+ plt.setp(ax2.get_xticklabels(), rotation=45, ha="right",
+          rotation_mode="anchor")
+ 
+ ax.set_ylabel('Positive words Concentration')
+ ax2.set_ylabel('Text\'s Length')
+#+end_src
+
+#+RESULTS:
+: # Out[48]:
+#+begin_src ipython :session session01 :exports none :results raw drawer :ipyfile ./obipy-resources/iwHDWw.png
+fig = plt.figure(figsize=(24,15))
+ax = fig.add_subplot(2,1,1)
+# ax2 = fig.add_subplot(2,1,2)
+
+tmp_df = revisions_df.set_index(["name"]).loc["Recep Tayyip Erdoğan"].set_index("Date")
+
+ax.plot(tmp_df['length'], '-r', label="Recep Tayyip Erdoğan") # positive words concentration
+# ax2.plot(tmp_df['length'], '-m', label="Recep Tayyip Erdoğan") # length of revision plot
+
+ax.spines["top"].set_color("None")
+ax.spines["right"].set_color("None")
+# ax2.spines["top"].set_color("None")
+# ax2.spines["right"].set_color("None")
+    
+plt.setp(ax.get_xticklabels(), rotation=45, ha="right",
+         rotation_mode="anchor")
+# plt.setp(ax2.get_xticklabels(), rotation=45, ha="right",
+#          rotation_mode="anchor")
+
+ax.set_ylabel('Text\'s Length')
+# ax2.set_ylabel('Text\'s Length')
+plt.title("Recep Tayyip Erdoğan")
+plt.legend()
+plt.tight_layout()
+#+end_src
+
+#+RESULTS:
+:results:
+# Out[60]:
+
+[[file:./obipy-resources/iwHDWw.png]]
+:end:
+
